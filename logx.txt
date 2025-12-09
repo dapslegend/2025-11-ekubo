@@ -1,0 +1,22 @@
+Compiling 1 files with Solc 0.8.31
+Solc 0.8.31 finished in 4.74s
+Compiler run successful with warnings:
+Warning (3805): This is a pre-release compiler version, please do not use it in production.
+
+Ran 1 test for test/TokenWrapper.t.sol:TokenWrapperTest
+[FAIL: DebtsNotZeroed(0); counterexample: calldata=0x0caed2b1000000000000000000000000000000000000000000000000000000002c0d958100000000000000000000000000000000000000028bee1794f501a3ef925023b1 args=[739087745 [7.39e8], 201762577100965722657882383281 [2.017e29]]] testMintUnbackedWrappersAndDrainCollateral(uint128,uint128) (runs: 0, μ: 0, ~: 0)
+Logs:
+  Bound result 170141183460469231731687303715623193473
+  Bound result 201762577100965722657882383281
+
+Suite result: FAILED. 0 passed; 1 failed; 0 skipped; finished in 2.56ms (1.46ms CPU time)
+
+Ran 1 test suite in 7.93ms (2.56ms CPU time): 0 tests passed, 1 failed, 0 skipped (1 total tests)
+
+Failing tests:
+Encountered 1 failing test in test/TokenWrapper.t.sol:TokenWrapperTest
+[FAIL: DebtsNotZeroed(0); counterexample: calldata=0x0caed2b1000000000000000000000000000000000000000000000000000000002c0d958100000000000000000000000000000000000000028bee1794f501a3ef925023b1 args=[739087745 [7.39e8], 201762577100965722657882383281 [2.017e29]]] testMintUnbackedWrappersAndDrainCollateral(uint128,uint128) (runs: 0, μ: 0, ~: 0)
+
+Encountered a total of 1 failing tests, 0 tests succeeded
+
+Tip: Run `forge test --rerun` to retry only the 1 failed test

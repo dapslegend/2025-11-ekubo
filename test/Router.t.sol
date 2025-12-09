@@ -422,6 +422,18 @@ contract RouterTest is FullTest {
         router.multiMultihopSwap(swaps, -808);
     }
 
+    function test_refundNativeToken_can_be_stolen() public {
+        vm.deal(address(this), 1 ether);
+        router.multicall{value: 1 ether}(new bytes[](0));
+
+        address thief = address(0xBEEF);
+        vm.prank(thief);
+        router.refundNativeToken();
+
+        assertEq(thief.balance, 1 ether);
+        assertEq(address(router).balance, 0);
+    }
+
     function test_validation_Swaps() public {
         PoolKey memory poolKey = createPool(0, 1 << 63, 100);
         Swap[] memory swaps = new Swap[](2);
